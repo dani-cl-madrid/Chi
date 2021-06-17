@@ -8,30 +8,30 @@
 
   This section always runs in the master jenkins.
 */
-try {
+// try {
+// library(
+//       identifier: 'jsl-jenkins-shared-library-local@master',
+//       retriever: modernSCM(
+//         [
+//           $class: 'GitSCMSource',
+//           remote: "/app/jenkins/git/jsl-jenkins-shared-library.git",
+//           extensions: [[$class: 'WipeWorkspace']]
+//         ]
+//       )
+//     ) _
+// } catch (Exception Ex) {
 library(
-      identifier: 'jsl-jenkins-shared-library-local@release/20210415',
-      retriever: modernSCM(
-        [
-          $class: 'GitSCMSource',
-          remote: "/app/jenkins/git/jsl-jenkins-shared-library.git",
-          extensions: [[$class: 'WipeWorkspace']]
-        ]
-      )
-    ) _
-} catch (Exception Ex) {
-library(
-  identifier: 'jsl-jenkins-shared-library@release/20210415',
+  identifier: 'jsl-jenkins-shared-library@FSDE-936]-ChiDevOpsGCR',
   retriever: modernSCM(
     [
       $class: 'GitSCMSource',
-      remote: "git@github.com:CenturyLink/jsl-jenkins-shared-library.git",
+      remote: "git@github.com:julianatienza/jsl-jenkins-shared-library.git",
       credentialsId: 'SCMAUTO_SSH_DEVOPS_PIPELINE',
       extensions: [[$class: 'WipeWorkspace']]
     ]
   )
 ) _
-}
+// }
 
 pipeline {
 
@@ -75,6 +75,15 @@ pipeline {
       BRANCH_NAME = GIT_BRANCH.split('/')[-1].trim().toLowerCase()
       COMMIT_ID = GIT_COMMIT.substring(0,7).trim().toLowerCase()
       PULL_REQUEST="pr-${env.CHANGE_ID}"
+
+      SCAN_BRANCH = 'demo_branch'
+      PROD_BRANCH = 'demo_branch'
+
+      // ServiceNow Variables
+      SERVICE_NOW_CREDENTIALS = 'snow-credentials'
+      SERVICE_NOW_HOST = 'mysupportdeskdev.service-now.com'
+      DEVOPS_GCR_PREPROD_BRANCH = 'demo_branch'
+
     }
     
 
@@ -123,19 +132,36 @@ pipeline {
                 echo "BRANCH_NAME: ${BRANCH_NAME}"
                 echo "COMMIT_ID: ${COMMIT_ID}"
                 echo "PULL_REQUEST: ${PULL_REQUEST}"
-                echo "CHANGE_ID: ${env.CHANGE_ID}"                       
+                echo "CHANGE_ID: ${env.CHANGE_ID}"
+                echo "TAG: ${env.TAG_NAME}"                       
             """, label: "Details summary"
-            if ( BRANCH_NAME != "master" && BRANCH_NAME != "pr-*" ) {
+            if ( BRANCH_NAME != PROD_BRANCH && BRANCH_NAME != "pr-*" ) {
               currentBuild.description = "<a href='https://github.com/CenturyLink/Chi/tree/${BRANCH_NAME}'>${BRANCH_NAME}</a> - <a href='https://${GIT_COMMIT}-chi-pr.enterprise.ctl.io'> WEB </a> : ${BRANCH_NAME}";
-            } else if ( BRANCH_NAME != "master" && BRANCH_NAME == "pr-*" && BRANCH_NAME == "PR-*" ) {
+            } else if ( BRANCH_NAME != PROD_BRANCH && BRANCH_NAME == "pr-*" && BRANCH_NAME == "PR-*" ) {
               currentBuild.description = "<a href='https://github.com/CenturyLink/Chi/pull/${CHANGE_ID}'>PR#${CHANGE_ID}</a> - <a href='https://${GIT_COMMIT}-chi-pr.enterprise.ctl.io'> WEB </a> : ${PULL_REQUEST}";
             }
           }
         }
       }
+      stage('Promote and Deployment tagging') {
+        when {
+          allOf {
+            branch PROD_BRANCH
+            tag '*##RC##*'
+          }
+        }
+        steps {
+          script {
+             def tagAttributes = jslGCRGetTagAttributes()
+             echo "Processing ${tagAttributes['tagType']} tag for DevOps ${tagAttributes['gcrNumber']}"             
+             jslGCRTag('PROMOTE', tagAttributes['tsMark'], tagAttributes['gcrNumber'])
+             jslGCRTag('DEPLOYMENT', tagAttributes['tsMark'], tagAttributes['gcrNumber'])
+          }
+        }
+      }      
       stage('Authorize - Prod only') {
         when {
-          branch 'master'
+          tag '*##DEPLOYMENT##*'
         }
         steps {
           script {
@@ -159,7 +185,7 @@ pipeline {
             }
             when {
               beforeAgent true
-              not { branch 'master' }
+              not { branch PROD_BRANCH }
             }
             steps {
               script{
@@ -174,6 +200,12 @@ pipeline {
             }
           }
           stage('DevSecOps') {
+            when {
+                allOf {
+                  not {tag '*##RC##*'}
+                  not {tag '*##PROMOTE##*'}
+                }
+            }            
             steps {
               script {
                 jslGitHubSecurityAlert()
@@ -182,8 +214,10 @@ pipeline {
           }
           stage('Package Version') {
             when {
-              beforeAgent true
-              branch 'master'
+              anyOf {
+                branch PROD_BRANCH
+                tag '*##DEPLOYMENT##*'
+              }
             }
             steps {
               script {
@@ -207,6 +241,12 @@ pipeline {
         }
       }
       stage('CE & Vue Build') {
+        when {
+            allOf {
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+            }
+        }  
         parallel {
           stage ('Building Custom elements') {
             agent {
@@ -267,6 +307,12 @@ pipeline {
             // registryCredentialsId DOCKER_CREDENTIALS
           }
         }
+        when {
+            allOf {
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+            }
+        }          
         steps {
           script {
             dir ('src/chi-vue') {
@@ -295,6 +341,12 @@ pipeline {
             // registryCredentialsId DOCKER_CREDENTIALS
           }
         }
+        when {
+            allOf {
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+            }
+        }          
         steps {
           script {
             sh script: """
@@ -304,6 +356,14 @@ pipeline {
         }
       }
       stage ('Tests') {
+        when {
+            beforeAgent true
+            allOf {
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+              not {tag '*##DEPLOYMENT##*'}
+            }
+        }          
         parallel {
           stage ('BackstopJS Responsive Test') {
             agent {
@@ -457,6 +517,14 @@ pipeline {
             // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
           }
         }
+        when {
+          beforeAgent true
+          allOf {
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+              not {tag '*##DEPLOYMENT##*'}
+          }
+        }          
         steps {
           script {
             // jslYarnWrapper('install')
@@ -483,6 +551,14 @@ pipeline {
             // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
           }
         }
+        when {
+            beforeAgent true
+            allOf {
+                not {tag '*##RC##*'}
+                not {tag '*##PROMOTE##*'}
+                not {tag '*##DEPLOYMENT##*'}
+            }        
+        }
         steps {
           script {
             try {
@@ -497,7 +573,7 @@ pipeline {
           }
         }
       }
-      stage('Quality Gate Check'){
+      stage('Quality Gate Check'){                  
         agent {
           dockerfile {
             filename 'Dockerfile'
@@ -507,49 +583,17 @@ pipeline {
             // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
           }
         }
+        when {
+            beforeAgent true
+            allOf {
+                not {tag '*##RC##*'}
+                not {tag '*##PROMOTE##*'}
+                not {tag '*##DEPLOYMENT##*'}
+            }        
+        }        
         steps {
           script {
             jslQualityGate()
-          }
-        }
-      }
-      stage('Smoke Tests') {
-        when {
-          beforeAgent true
-          allOf {
-            expression{ return currentBuild.currentResult.toLowerCase() == "success" }
-          }
-        }
-        agent {
-          dockerfile {
-            filename 'Dockerfile'
-            dir 'cicd/docker/sonar-scanner'
-            label 'Docker-enabled'
-            // registryUrl DOCKER_REGISTRY
-            // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
-          }
-        }
-        steps {
-          script {
-            // unstash name: "E2E_REPORTS"
-            // def cypress_url = parseIngressUrl()
-            // echo "Deployment is reachable at ${cypress_url}"
-            // jslNpmWrapper('ci')
-            // jslNpmWrapper("run test:smoke:jenkins -- --url ${cypress_url} || echo Smoke Tests failed!")
-            // echo "Smoke Tests completed"
-            // jslPublishTestResults('tests/e2e/reports/*xml')
-            // stash name: "E2E_REPORTS", includes: "tests/e2e/reports/**"
-
-            // def VIDEOS_AVAILABLE = -1
-            // VIDEOS_AVAILABLE = sh(script: "ls tests/e2e/videos/*", returnStatus: true)
-            // if (VIDEOS_AVAILABLE == 0) {
-            //   archiveArtifacts artifacts: 'tests/e2e/videos/**/*'
-            // }
-            // def SCREENSHOTS_AVAILABLE = -1
-            // SCREENSHOTS_AVAILABLE = sh(script: "ls tests/e2e/screenshots/*", returnStatus: true)
-            // if (SCREENSHOTS_AVAILABLE == 0) {
-            //   archiveArtifacts artifacts: 'tests/e2e/screenshots/**/*'
-            echo "Depends on NPX being available for testing on the JSL"
           }
         }
       }
@@ -563,6 +607,14 @@ pipeline {
             // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
           }
         }
+        when {
+            beforeAgent true
+            allOf {
+                not {tag '*##RC##*'}
+                not {tag '*##PROMOTE##*'}
+                not {tag '*##DEPLOYMENT##*'}
+            }        
+        }        
         steps {
           script {
             try {
@@ -593,14 +645,18 @@ pipeline {
       stage('Version check & Publish') {
         when {
           beforeAgent true
-          branch 'master'
-          expression {
-            unstash name: "VERSION_BUMP"
-            def versionBump = readFile file: "version_bump"
-            echo "Publish condition: GIT_BRANCH is _${env.GIT_BRANCH.trim().toLowerCase()}_"
-            echo "Publish condition: currentResult is _${currentBuild.currentResult.toLowerCase()}_"
-            echo "Publish condition: versionBump is _${versionBump.trim()}_"
-            return versionBump.trim() == "yes" && currentBuild.currentResult.toLowerCase() == "success" && ['origin/master', 'origin/main', 'master', 'main'].contains(env.GIT_BRANCH.trim().toLowerCase())
+          allOf {
+              branch PROD_BRANCH
+              not {tag '*##RC##*'}
+              not {tag '*##PROMOTE##*'}
+              expression {
+                unstash name: "VERSION_BUMP"
+                def versionBump = readFile file: "version_bump"
+                echo "Publish condition: GIT_BRANCH is _${env.GIT_BRANCH.trim().toLowerCase()}_"
+                echo "Publish condition: currentResult is _${currentBuild.currentResult.toLowerCase()}_"
+                echo "Publish condition: versionBump is _${versionBump.trim()}_"
+                return versionBump.trim() == "yes" && currentBuild.currentResult.toLowerCase() == "success" && ['origin/master', 'origin/main', 'master', 'main', PROD_BRANCH].contains(env.GIT_BRANCH.trim().toLowerCase())
+              }
           }
         }
         stages {
@@ -661,7 +717,8 @@ pipeline {
                   """,
                   returnStdout: true 
                 ).trim()
-                jslHubWrapper("release create -F shortCHANGELOG.md v${VERSION}")
+                echo """placeHolder for jslHubWrapper("release create -F shortCHANGELOG.md v${VERSION}")"""
+                //jslHubWrapper("release create -F shortCHANGELOG.md v${VERSION}")
               }
             }
           }
@@ -689,7 +746,9 @@ pipeline {
               // jslNpmWrapper('pack')
               // jslNpmWrapper('login --scope=@centurylink --registry=https://npm.pkg.github.com')
               // jslNpmWrapper('publish')
-              jslNpmPublish(false, env.GITHUB_ALTER_CREDENTIALS)
+              
+              echo """jslNpmPublish(false, env.GITHUB_ALTER_CREDENTIALS)"""
+              //jslNpmPublish(false, env.GITHUB_ALTER_CREDENTIALS)
             }
           }
         }
@@ -699,7 +758,7 @@ pipeline {
           stage ('Publish Dev build') {
             when {
               beforeAgent true
-              not { branch 'master' }
+              not { branch PROD_BRANCH }
             }
             steps {
               script {
@@ -720,21 +779,33 @@ pipeline {
 }
 PolicyDocument
                 """, label: "Policy.json"
-                jslAwsCliWrapper("s3api create-bucket --bucket ${s3Uri} --acl public-read", 'us-east-1', true)
-                jslAwsCliWrapper("s3api put-bucket-policy --bucket ${s3Uri} --policy file://policy.json", 'us-east-1', true)
-                jslAwsCliWrapper("s3api get-bucket-policy --bucket ${s3Uri}", 'us-east-1', true)
-                jslAwsCliWrapper("s3 cp ./dist s3://${s3Uri} --recursive", 'us-east-1', true)
-                jslAwsCliWrapper("s3 website s3://${s3Uri} --index-document index.html --error-document index.html", 'us-east-1', true)
+                
+                echo "PlaceHolder for jslAwsCliWrapper"
+                // jslAwsCliWrapper("s3api create-bucket --bucket ${s3Uri} --acl public-read", 'us-east-1', true)
+                // jslAwsCliWrapper("s3api put-bucket-policy --bucket ${s3Uri} --policy file://policy.json", 'us-east-1', true)
+                // jslAwsCliWrapper("s3api get-bucket-policy --bucket ${s3Uri}", 'us-east-1', true)
+                // jslAwsCliWrapper("s3 cp ./dist s3://${s3Uri} --recursive", 'us-east-1', true)
+                // jslAwsCliWrapper("s3 website s3://${s3Uri} --index-document index.html --error-document index.html", 'us-east-1', true)
+                
+
                 // sh "sleep 10m"
                 // jslAwsCliWrapper("s3 rb ${s3Uri} --force", 'us-east-1', true)
                 echo "This will publish dev build to S3"
+                if (env.CHANGE_ID != null) {
+                  jslJiraSendDeploymentInfo('development')
+                } else {
+                  jslJiraSendDeploymentInfo('staging', true)
+                }
               }
             }
           }
           stage ('Publish Prod Build') {
             when {
               beforeAgent true
-              branch 'master'
+              allOf {
+                  branch PROD_BRANCH
+                  tag '*##DEPLOYMENT##*'                  
+              }
             }
             agent {
               dockerfile {
@@ -773,39 +844,96 @@ PolicyDocument
                   """,
                   returnStdout: true
                 ).trim()
-                sh script:"""
-                  ls -lah
-                  VERSION=\$(cat package.json | grep '"version":' | cut -f4 -d '"')
-                  echo \${VERSION}
-                  cat << PRDesc > ux-chi-AssetsServer/prepared-message.md
-This PR is for CHI \${VERSION}
 
-You can check staging in https://assets-dev.ctl.io/chi/staging
-PRDesc
-                  mkdir -p ${WORKSPACE}/ux-chi-AssetsServer/chi/latest
-                  cp -R ${WORKSPACE}/dist/* ${WORKSPACE}/ux-chi-AssetsServer/chi/latest/
-                  mv ${WORKSPACE}/dist ${WORKSPACE}/ux-chi-AssetsServer/chi/\$VERSION
-                  cd ${WORKSPACE}/ux-chi-AssetsServer
-                  git checkout -b "CHI_\$VERSION"
-                  git add ${WORKSPACE}/ux-chi-AssetsServer/chi/\$VERSION
-                  git add ${WORKSPACE}/ux-chi-AssetsServer/chi/latest
-                  git config user.email "scmauto@lumen.com"
-                  git config user.name "SCMAUTO"
-                  git commit -m "CHI_\$VERSION"
-                  git push -f origin CHI_\$VERSION
-                """, label: "Pushing branch to AssetsServer"
-                if ( CHECK == "NO" ) {
-                  dir ('ux-chi-AssetsServer') {
-                    jslHubWrapper('pull-request -F prepared-message.md')
-                  }
-                } else {
-                  echo "NO PR CREATED THIS TIME; REQUIRES VERSION BUMP"
-                }
+                echo "PlaceHolder for ASSET Server Push of CHI version"
+//                 sh script:"""
+//                   ls -lah
+//                   VERSION=\$(cat package.json | grep '"version":' | cut -f4 -d '"')
+//                   echo \${VERSION}
+//                   cat << PRDesc > ux-chi-AssetsServer/prepared-message.md
+// This PR is for CHI \${VERSION}
+
+// You can check staging in https://assets-dev.ctl.io/chi/staging
+// PRDesc
+//                   mkdir -p ${WORKSPACE}/ux-chi-AssetsServer/chi/latest
+//                   cp -R ${WORKSPACE}/dist/* ${WORKSPACE}/ux-chi-AssetsServer/chi/latest/
+//                   mv ${WORKSPACE}/dist ${WORKSPACE}/ux-chi-AssetsServer/chi/\$VERSION
+//                   cd ${WORKSPACE}/ux-chi-AssetsServer
+//                   git checkout -b "CHI_\$VERSION"
+//                   git add ${WORKSPACE}/ux-chi-AssetsServer/chi/\$VERSION
+//                   git add ${WORKSPACE}/ux-chi-AssetsServer/chi/latest
+//                   git config user.email "scmauto@lumen.com"
+//                   git config user.name "SCMAUTO"
+//                   git commit -m "CHI_\$VERSION"
+//                   git push -f origin CHI_\$VERSION
+//                 """, label: "Pushing branch to AssetsServer"
+                // if ( CHECK == "NO" ) {
+                //   dir ('ux-chi-AssetsServer') {
+                //     jslHubWrapper('pull-request -F prepared-message.md')
+                //   }
+                // } else {
+                //   echo "NO PR CREATED THIS TIME; REQUIRES VERSION BUMP"
+                // }
+                jslJiraSendDeploymentInfo('production', true)
               }
             }
           }            
         }
       }
+      stage('Smoke Tests') {
+        agent {
+          dockerfile {
+            filename 'Dockerfile'
+            dir 'cicd/docker/sonar-scanner'
+            label 'Docker-enabled'
+            // registryUrl DOCKER_REGISTRY
+            // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
+          }
+        }
+        when {
+          beforeAgent true
+          allOf {
+              branch PROD_BRANCH
+              tag '*##DEPLOYMENT##*'
+          }
+        }        
+        steps {
+          script {
+            // unstash name: "E2E_REPORTS"
+            // def cypress_url = parseIngressUrl()
+            // echo "Deployment is reachable at ${cypress_url}"
+            // jslNpmWrapper('ci')
+            // jslNpmWrapper("run test:smoke:jenkins -- --url ${cypress_url} || echo Smoke Tests failed!")
+            // echo "Smoke Tests completed"
+            // jslPublishTestResults('tests/e2e/reports/*xml')
+            // stash name: "E2E_REPORTS", includes: "tests/e2e/reports/**"
+
+            // def VIDEOS_AVAILABLE = -1
+            // VIDEOS_AVAILABLE = sh(script: "ls tests/e2e/videos/*", returnStatus: true)
+            // if (VIDEOS_AVAILABLE == 0) {
+            //   archiveArtifacts artifacts: 'tests/e2e/videos/**/*'
+            // }
+            // def SCREENSHOTS_AVAILABLE = -1
+            // SCREENSHOTS_AVAILABLE = sh(script: "ls tests/e2e/screenshots/*", returnStatus: true)
+            // if (SCREENSHOTS_AVAILABLE == 0) {
+            //   archiveArtifacts artifacts: 'tests/e2e/screenshots/**/*'
+            // echo "Depends on NPX being available for testing on the JSL"
+            try {
+              jslNpxWrapper('gulp serve 2>&1 >/dev/null &')
+              sh script: """
+                ./node_modules/.bin/cypress run --url https://assets.ctl.io/chi
+              """, label: "Running NPX before adding JSL file, TEST."
+              jslNpxWrapper('gulp serve:stop')
+              // What's the result to attach XML to the GCR Update?
+              jslGCRDevOpsUpdate('SUCCEEDS', ['hook_smoke_tests_results.xml'])
+            } catch (Exception e) {
+              // What's the result to attach XML to the GCR Update?
+              jslGCRDevOpsUpdate('FAILED', ['hook_smoke_tests_results.xml'], 'SmokeTests failed after deployment and release PR should be closed')
+              // TODO: Close PR? 
+            }  
+          }
+        }
+      }      
     }
     post {
       /*
@@ -817,7 +945,7 @@ PRDesc
       */
       success {
         jslNotification('success')
-        jslGitHubMessage("You can check this PRs instance in https://${GIT_COMMIT}-chi-pr.enterprise.ctl.io", env.CHANGE_ID)
+        // jslGitHubMessage("You can check this PRs instance in https://${GIT_COMMIT}-chi-pr.enterprise.ctl.io", env.CHANGE_ID)
         cleanWs()  
       }
       failure {
