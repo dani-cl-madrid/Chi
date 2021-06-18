@@ -571,11 +571,6 @@ pipeline {
             unstash name: "BACKSTOP-NON-RES-CI"
             unstash name: "BACKSTOP-RES-CI"
             jslSonarQubeStaticAnalysis('./cicd/docker/SonarQube/sonar-project.properties', env.SONARQUBE_CREDENTIALS)
-            try {
-              stash name: "SONARQUBE_REPORT", includes: "sonarqubeReport"
-            } catch (Exception e) {
-              echo "No SonarQube Report"
-            }
           }
         }
       }
@@ -600,51 +595,6 @@ pipeline {
         steps {
           script {
             jslQualityGate()
-          }
-        }
-      }
-      stage('Adoption Stats') {
-        agent {
-          dockerfile {
-            filename 'Dockerfile'
-            dir 'cicd/docker/jira'
-            label 'Docker-enabled'
-            // registryUrl DOCKER_REGISTRY
-            // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
-          }
-        }
-        when {
-            beforeAgent true
-            allOf {
-                not {tag '*##RC##*'}
-                not {tag '*##PROMOTE##*'}
-                not {tag '*##DEPLOYMENT##*'}
-            }        
-        }        
-        steps {
-          script {
-            try {
-              unstash name: "E2E_REPORTS"
-              jslAdoptionMain('reports/cypress/*xml')
-            } catch (Exception e) {
-              try {
-                sh """
-                  rm -rf reports/ci_report/*
-                """
-                unstash name: "BACKSTOP-CE-CI"
-                unstash name: "BACKSTOP-NON-RES-CI"
-                unstash name: "BACKSTOP-RES-CI"
-                sh """
-                  cat reports/ci_report/responsive/xunit.xml > reports/ci_report/xunitfinal.xml
-                  cat reports/ci_report/non_responsive/xunit.xml >> reports/ci_report/xunitfinal.xml
-                  cat reports/ci_report/non_responsive_ce/xunit.xml >> reports/ci_report/xunitfinal.xml
-                """
-                jslAdoptionMain('reports/ci_report/xunitfinal.xml')
-                echo "No E2E results found, reporting only unit"
-              } catch (Exception exc) {
-                echo "No tests present"
-              }
-            }
           }
         }
       }
@@ -933,17 +883,18 @@ PolicyDocument
               jslNpxWrapper('gulp serve 2>&1 >/dev/null &')
               sh script: """
                 set -x
+                rm -rf cypress/reports
                 mkdir -p cypress/reports
                 ./node_modules/.bin/cypress run --url https://assets.ctl.io/chi
-                ls cypress/reports
+                ls reports/cypress
               """, label: "Cypress Smoke Tests"
               jslNpxWrapper('gulp serve:stop')
               echo "Stopping SMOKE TESTS"
             } catch (Exception e) {
               smokeTestFailure = e.getMessage()
             }    
-            
-            zip zipFile: 'smoke_tests.zip', dir: "cypress/reports"
+            stash name: 'smokeTests', includes:"reports/cypress"
+            zip zipFile: 'smoke_tests.zip', dir: "reports/cypress"
             if (smokeTestFailure == null) {
               jslGCRDevOpsUpdate('SUCCEEDS', ['smoke_tests.zip'])
             } else {
@@ -952,7 +903,56 @@ PolicyDocument
             }  
           }
         }
-      }      
+      }
+      stage('Adoption Stats') {
+        agent {
+          dockerfile {
+            filename 'Dockerfile'
+            dir 'cicd/docker/jira'
+            label 'Docker-enabled'
+            // registryUrl DOCKER_REGISTRY
+            // registryCredentialsId DOCKER_LOGIN_CREDENTIALS
+          }
+        }
+        when {
+            beforeAgent true
+            allOf {
+                not {tag '*##RC##*'}
+                not {tag '*##PROMOTE##*'}
+            }        
+        }        
+        steps {
+          script {
+            try {
+              if (env.TAG_NAME && env.TAG_NAME.toString().indexOf("##DEPLOYMENT##") != -1) {
+                echo "Adding Smoke Tests to AdoptionMain"
+                unstash name: "smokeTests"
+              }
+              
+              unstash name: "E2E_REPORTS"
+              jslAdoptionMain('reports/cypress/*xml')
+            } catch (Exception e) {
+              try {
+                sh """
+                  rm -rf reports/ci_report/*
+                """
+                unstash name: "BACKSTOP-CE-CI"
+                unstash name: "BACKSTOP-NON-RES-CI"
+                unstash name: "BACKSTOP-RES-CI"
+                sh """
+                  cat reports/ci_report/responsive/xunit.xml > reports/ci_report/xunitfinal.xml
+                  cat reports/ci_report/non_responsive/xunit.xml >> reports/ci_report/xunitfinal.xml
+                  cat reports/ci_report/non_responsive_ce/xunit.xml >> reports/ci_report/xunitfinal.xml
+                """
+                jslAdoptionMain('reports/ci_report/xunitfinal.xml')
+                echo "No E2E results found, reporting only unit"
+              } catch (Exception exc) {
+                echo "No tests present"
+              }
+            }
+          }
+        }
+      }            
     }
     post {
       /*
