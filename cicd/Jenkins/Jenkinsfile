@@ -149,10 +149,7 @@ pipeline {
       }
       stage('Promote and Deployment tagging') {
         when {
-          allOf {
-            branch PROD_BRANCH
             tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"
-          }
         }
         steps {
           script {
@@ -610,9 +607,10 @@ pipeline {
         when {
           beforeAgent true
           allOf {
-              branch PROD_BRANCH
-              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
-              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+              anyOf {
+                branch PROD_BRANCH
+                tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
+              }
               expression {
                 unstash name: "VERSION_BUMP"
                 def versionBump = readFile file: "version_bump"
@@ -722,7 +720,12 @@ pipeline {
           stage ('Publish Dev build') {
             when {
               beforeAgent true
-              not { branch PROD_BRANCH }
+              allOf {
+                not {branch PROD_BRANCH}
+                not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+                not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+                not {tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"}
+              }
             }
             steps {
               script {
@@ -768,10 +771,7 @@ PolicyDocument
           stage ('Publish Prod Build') {
             when {
               beforeAgent true
-              allOf {
-                  branch PROD_BRANCH
-                  tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
-              }
+              tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
             }
             agent {
               dockerfile {
@@ -859,10 +859,7 @@ PolicyDocument
         }
         when {
           beforeAgent true
-          allOf {
-              branch PROD_BRANCH
-              tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
-          }
+          tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
         }        
         steps {
           script {
