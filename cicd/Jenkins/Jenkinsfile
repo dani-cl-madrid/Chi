@@ -164,7 +164,7 @@ pipeline {
              def currentBaseName = env.JOB_BASE_NAME.toString()
              def pathJob = preprodJob - preprodBaseName
              echo "Triggering deployment to production job ${pathJob} with tag ${tagName}"
-             jslTriggerRemoteJob(tagName, pathJob, false, false, 5)
+             jslTriggerRemoteJob(tagName.trim(), "/${pathJob}/", false, false, 6)
           }
         }
       }      
