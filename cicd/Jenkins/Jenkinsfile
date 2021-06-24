@@ -85,7 +85,9 @@ pipeline {
       SERVICE_NOW_CREDENTIALS = 'snow-credentials'
       SERVICE_NOW_HOST = 'mysupportdeskdev.service-now.com'
       DEVOPS_GCR_PREPROD_BRANCH = 'demo_branch'
-
+      RC_TAG_PATTERN =  /(.*##RC##.*)/
+      PROMOTE_TAG_PATTERN =  /(.*##PROMOTE##.*)/
+      DEPLOY_TAG_PATTERN =  /(.*##DEPLOY##.*)/
     }
     
 
@@ -149,7 +151,7 @@ pipeline {
         when {
           allOf {
             branch PROD_BRANCH
-            tag '*##RC##*'
+            tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"
           }
         }
         steps {
@@ -162,13 +164,13 @@ pipeline {
              def currentBaseName = env.JOB_BASE_NAME.toString()
              def pathJob = preprodJob - preprodBaseName
              echo "Triggering deployment to production job ${pathJob} with tag ${tagName}"
-             jslTriggerRemoteJob(tagName.replace("#", "%23"), pathJob, false, false, 5)
+             jslTriggerRemoteJob(tagName, pathJob, false, false, 5)
           }
         }
       }      
       stage('Authorize - Prod only') {
         when {
-          tag '*##DEPLOYMENT##*'
+          tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
         }
         steps {
           script {
@@ -209,8 +211,8 @@ pipeline {
           stage('DevSecOps') {
             when {
                 allOf {
-                  not {tag '*##RC##*'}
-                  not {tag '*##PROMOTE##*'}
+                  not { tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+                  not { tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
                 }
             }            
             steps {
@@ -223,7 +225,7 @@ pipeline {
             when {
               anyOf {
                 branch PROD_BRANCH
-                tag '*##DEPLOYMENT##*'
+                tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
               }
             }
             steps {
@@ -250,8 +252,8 @@ pipeline {
       stage('CE & Vue Build') {
         when {
             allOf {
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
             }
         }  
         parallel {
@@ -316,8 +318,8 @@ pipeline {
         }
         when {
             allOf {
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
             }
         }          
         steps {
@@ -350,8 +352,8 @@ pipeline {
         }
         when {
             allOf {
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
             }
         }          
         steps {
@@ -366,9 +368,9 @@ pipeline {
         when {
             beforeAgent true
             allOf {
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
-              not {tag '*##DEPLOYMENT##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"}
             }
         }          
         parallel {
@@ -527,9 +529,9 @@ pipeline {
         when {
           beforeAgent true
           allOf {
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
-              not {tag '*##DEPLOYMENT##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"}
           }
         }          
         steps {
@@ -561,9 +563,9 @@ pipeline {
         when {
             beforeAgent true
             allOf {
-                not {tag '*##RC##*'}
-                not {tag '*##PROMOTE##*'}
-                not {tag '*##DEPLOYMENT##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"}
             }        
         }
         steps {
@@ -593,9 +595,9 @@ pipeline {
         when {
             beforeAgent true
             allOf {
-                not {tag '*##RC##*'}
-                not {tag '*##PROMOTE##*'}
-                not {tag '*##DEPLOYMENT##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"}
             }        
         }        
         steps {
@@ -609,8 +611,8 @@ pipeline {
           beforeAgent true
           allOf {
               branch PROD_BRANCH
-              not {tag '*##RC##*'}
-              not {tag '*##PROMOTE##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
               expression {
                 unstash name: "VERSION_BUMP"
                 def versionBump = readFile file: "version_bump"
@@ -768,7 +770,7 @@ PolicyDocument
               beforeAgent true
               allOf {
                   branch PROD_BRANCH
-                  tag '*##DEPLOYMENT##*'                  
+                  tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
               }
             }
             agent {
@@ -859,7 +861,7 @@ PolicyDocument
           beforeAgent true
           allOf {
               branch PROD_BRANCH
-              tag '*##DEPLOYMENT##*'
+              tag pattern: DEPLOY_TAG_PATTERN, comparator: "REGEXP"
           }
         }        
         steps {
@@ -923,8 +925,8 @@ PolicyDocument
         when {
             beforeAgent true
             allOf {
-                not {tag '*##RC##*'}
-                not {tag '*##PROMOTE##*'}
+              not {tag pattern: RC_TAG_PATTERN, comparator: "REGEXP"}
+              not {tag pattern: PROMOTE_TAG_PATTERN, comparator: "REGEXP"}
             }        
         }        
         steps {
