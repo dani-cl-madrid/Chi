@@ -87,7 +87,7 @@ pipeline {
       DEVOPS_GCR_PREPROD_BRANCH = 'demo_branch'
       RC_TAG_PATTERN =  /(.*##RC##.*)/
       PROMOTE_TAG_PATTERN =  /(.*##PROMOTE##.*)/
-      DEPLOY_TAG_PATTERN =  /(.*##DEPLOY##.*)/
+      DEPLOY_TAG_PATTERN =  /(.*##DEPLOYMENT##.*)/
     }
     
 
