@@ -159,7 +159,7 @@ pipeline {
              def tagName = jslGCRTag('DEPLOYMENT', tagAttributes['tsMark'], tagAttributes['gcrNumber'])
              def currentJob = env.JOB_NAME.toString()
              def currentBaseName = env.JOB_BASE_NAME.toString()
-             def pathJob = preprodJob - preprodBaseName
+             def pathJob = currentJob - currentBaseName
              echo "Triggering deployment to production job ${pathJob} with tag ${tagName}"
              jslTriggerRemoteJob(tagName.trim(), "/${pathJob}/", false, false, 6)
           }
