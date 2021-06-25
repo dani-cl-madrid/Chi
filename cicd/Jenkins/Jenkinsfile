@@ -885,9 +885,32 @@ PolicyDocument
             // if (SCREENSHOTS_AVAILABLE == 0) {
             //   archiveArtifacts artifacts: 'tests/e2e/screenshots/**/*'
             // echo "Depends on NPX being available for testing on the JSL"
+            echo "Starting SMOKE TESTS"
+            sh """
+              rm -rf dist
+              rm -rf node_modules
+            """
+            jslYarnWrapper('install')
+            jslYarnWrapper('cache clean')
+            unstash name: "DIST-CHI"
+            dir ('src/custom-elements') {
+              sh """
+                rm -rf dist
+                rm -rf node_modules
+              """
+              unstash name: "DIST-CHI-CE"
+              unstash name: "NODEMODULES-CHI-CE"
+            }
+            dir ('src/chi-vue') {
+              sh """
+                rm -rf dist
+                rm -rf node_modules
+              """
+              unstash name: "DIST-CHI-VUE"
+              unstash name: "NODEMODULES-CHI-VUE"
+            }                   
             def smokeTestFailure = null
             try {
-              echo "Starting SMOKE TESTS"
               jslNpxWrapper('gulp serve 2>&1 >/dev/null &')
               sh script: """
                 set -x
